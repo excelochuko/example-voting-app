@@ -11,6 +11,7 @@ WORKDIR /usr/local/app
 
 # Update vulnerable Python packaging dependencies
 RUN pip install --no-cache-dir --upgrade \
+    "setuptools>=80.9.0" \
     "jaraco.context>=6.1.0" \
     "wheel>=0.46.2"
 
