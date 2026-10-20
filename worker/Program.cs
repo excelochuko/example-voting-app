@@ -16,7 +16,7 @@ namespace Worker
         {
             try
             {
-                var pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
+                var pgsql = OpenDbConnection(GetDbConnectionString());
                 var redisConn = OpenRedisConnection("redis");
                 var redis = redisConn.GetDatabase();
 
@@ -46,7 +46,7 @@ namespace Worker
                         if (!pgsql.State.Equals(System.Data.ConnectionState.Open))
                         {
                             Console.WriteLine("Reconnecting DB");
-                            pgsql = OpenDbConnection("Server=db;Username=postgres;Password=postgres;");
+                            pgsql = OpenDbConnection(GetDbConnectionString());
                         }
                         else
                         { // Normal +1 vote requested
@@ -64,6 +64,17 @@ namespace Worker
                 Console.Error.WriteLine(ex.ToString());
                 return 1;
             }
+        }
+
+        private static string GetDbConnectionString()
+        {
+            var host = Environment.GetEnvironmentVariable("DB_HOST") ?? "db";
+            var port = Environment.GetEnvironmentVariable("DB_PORT") ?? "5432";
+            var username = Environment.GetEnvironmentVariable("POSTGRES_USER");
+            var password = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD");
+            var database = Environment.GetEnvironmentVariable("POSTGRES_DB");
+
+            return $"Host={host};Port={port};Username={username};Password={password};Database={database}";
         }
 
         private static NpgsqlConnection OpenDbConnection(string connectionString)
@@ -130,25 +141,22 @@ namespace Worker
                 .First(a => a.AddressFamily == AddressFamily.InterNetwork)
                 .ToString();
 
-        private static void UpdateVote(NpgsqlConnection connection, string voterId, string vote)
-        {
-            var command = connection.CreateCommand();
-            try
-            {
-                command.CommandText = "INSERT INTO votes (id, vote) VALUES (@id, @vote)";
-                command.Parameters.AddWithValue("@id", voterId);
-                command.Parameters.AddWithValue("@vote", vote);
+
+private static void UpdateVote(NpgsqlConnection connection, string voterId, string vote)
+{
+    using var command = connection.CreateCommand();
+
+    command.CommandText = @"
+        INSERT INTO votes (id, vote)
+        VALUES (@id, @vote)
+        ON CONFLICT (id)
+        DO UPDATE SET vote = EXCLUDED.vote;
+    ";
+
+    command.Parameters.AddWithValue("@id", voterId);
+    command.Parameters.AddWithValue("@vote", vote);
+
                 command.ExecuteNonQuery();
-            }
-            catch (DbException)
-            {
-                command.CommandText = "UPDATE votes SET vote = @vote WHERE id = @id";
-                command.ExecuteNonQuery();
-            }
-            finally
-            {
-                command.Dispose();
-            }
         }
     }
 }
