@@ -9,6 +9,11 @@ RUN apt-get update && \
 # Set the application directory
 WORKDIR /usr/local/app
 
+# Update vulnerable Python packaging dependencies
+RUN pip install --no-cache-dir --upgrade \
+    "jaraco.context>=6.1.0" \
+    "wheel>=0.46.2"
+
 # Install our requirements.txt
 COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
