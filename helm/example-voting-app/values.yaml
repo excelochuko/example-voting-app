@@ -37,3 +37,6 @@ postgresql:
   existingSecret: voting-db
   persistence:
     enabled: false
+
+# Used to demonstrate a Helm upgrade and rollback.
+rolloutNote: "initial"

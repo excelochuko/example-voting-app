@@ -113,6 +113,8 @@ spec:
     metadata:
       labels:
         app: vote
+      annotations:
+        capstone.example.com/rollout-note: {{ .Values.rolloutNote | default "initial" | quote }}
     spec:
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
