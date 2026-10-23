@@ -63,3 +63,23 @@ The voting application only accepts one vote per client browser. It does not reg
 This isn't an example of a properly architected perfectly designed distributed app... it's just a simple
 example of the various types of pieces and languages you might see (queues, persistent data, etc), and how to
 deal with them in Docker at a basic level.
+
+## AWS EKS Capstone
+
+Deployed to Amazon EKS using Terraform and Helm. GitHub Actions builds and scans images with Trivy, publishes them to GHCR, and deploys through AWS OIDC.
+
+Cluster: `voting-capstone`
+Region: `eu-north-1`
+Namespace: `voting-app`
+
+### Verify the deployment
+
+Run `kubectl get nodes` and `kubectl get pods,services -n voting-app` to check cluster health. Run `helm history voting-app -n voting-app` to inspect releases.
+
+### Local access
+
+Run `kubectl port-forward -n voting-app service/vote 8080:8080` to open the voting page at `http://localhost:8080`. In a second terminal, run `kubectl port-forward -n voting-app service/result 8081:8081` to open the results at `http://localhost:8081`. Keep both commands running while testing.
+
+### Rollback demonstration
+
+A test upgrade with an invalid voting image tag failed as expected. Helm rollback restored revision 2, and all five application pods returned to Ready. See `helm history voting-app -n voting-app` for the release history.
