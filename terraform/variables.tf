@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "expected_account_id" {
   description = "AWS account ID permitted for this deployment"
   type        = string
-  default     = "895544788491"
+  default     = "325774504351"
 }
 
 variable "cluster_name" {
@@ -32,4 +32,9 @@ variable "node_instance_types" {
   description = "EC2 instance types for the EKS worker nodes"
   type        = list(string)
   default     = ["t3.small"]
+}
+variable "github_actions_role_arn" {
+  description = "IAM role used by GitHub Actions to deploy the voting app"
+  type        = string
+  default     = "arn:aws:iam::325774504351:role/voting-capstone-github-deploy"
 }

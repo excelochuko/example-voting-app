@@ -107,3 +107,124 @@ jobs:
           context: ./worker
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/example-voting-app-worker:${{ github.sha }}
+
+  deploy:
+    name: Deploy voting app to EKS
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/capstone/security-hardening'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: eu-north-1
+      EKS_CLUSTER_NAME: voting-capstone
+      K8S_NAMESPACE: voting-app
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::325774504351:role/voting-capstone-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActionsDeploy
+
+      - name: Capture cluster settings and runner IP
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG="$(aws eks describe-cluster \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --query 'cluster.resourcesVpcConfig' \
+            --output json)"
+          echo "$CONFIG" > /tmp/eks-vpc-config.json
+          RUNNER_IP="$(curl -4 --fail --silent --show-error https://checkip.amazonaws.com | tr -d '\r\n')"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+      - name: Temporarily allow this runner to access EKS
+        id: open_endpoint
+        run: |
+          set -euo pipefail
+          aws eks update-cluster-config \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --resources-vpc-config "endpointPublicAccess=true,endpointPrivateAccess=true,publicAccessCidrs=${RUNNER_IP}/32"
+
+          aws eks wait cluster-active \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubectl for EKS
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
+          kubectl version --client
+          helm version
+
+      - name: Deploy application with Helm
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+
+          kubectl create secret generic voting-db \
+            --namespace "$K8S_NAMESPACE" \
+            --from-literal=POSTGRES_USER="$POSTGRES_USER" \
+            --from-literal=POSTGRES_DB="$POSTGRES_DB" \
+            --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          helm upgrade --install voting-app ./helm/example-voting-app \
+            --namespace "$K8S_NAMESPACE" \
+            --set-string images.vote.tag="$GITHUB_SHA" \
+            --set-string images.result.tag="$GITHUB_SHA" \
+            --set-string images.worker.tag="$GITHUB_SHA" \
+            --set-string rolloutNote="$GITHUB_SHA"
+
+          kubectl rollout status deployment/db -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/redis -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/vote -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/result -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl rollout status deployment/worker -n "$K8S_NAMESPACE" --timeout=180s
+          kubectl get pods,services -n "$K8S_NAMESPACE"
+
+      - name: Restore original EKS endpoint access settings
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -s /tmp/eks-vpc-config.json ]]; then
+            echo "No saved EKS endpoint settings found; nothing to restore."
+            exit 0
+          fi
+
+          ORIGINAL_CONFIG="$(jq -c '{
+            endpointPublicAccess: .endpointPublicAccess,
+            endpointPrivateAccess: .endpointPrivateAccess,
+            publicAccessCidrs: .publicAccessCidrs
+          }' /tmp/eks-vpc-config.json)"
+
+          aws eks update-cluster-config \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --resources-vpc-config "$ORIGINAL_CONFIG"
+
+          aws eks wait cluster-active \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION"
