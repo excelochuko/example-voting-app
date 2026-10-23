@@ -142,7 +142,12 @@ jobs:
           keys = ("iss", "aud", "sub", "repository", "repository_owner",
                   "ref", "workflow_ref", "job_workflow_ref",
                   "repository_id", "repository_owner_id")
-          print(json.dumps({key: claims.get(key) for key in keys}, indent=2))
+          result = {key: claims.get(key) for key in keys}
+          print(json.dumps(result, indent=2))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("### GitHub OIDC diagnostic claims\n\n```json\n")
+              json.dump(result, summary, indent=2)
+              summary.write("\n```\n")
           PYCLAIMS
 
       - name: Configure AWS credentials through OIDC
