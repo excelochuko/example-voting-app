@@ -27,10 +27,22 @@ variable "github_owner" {
   default     = "excelochuko"
 }
 
+variable "github_owner_id" {
+  description = "Immutable GitHub owner ID used in the OIDC subject"
+  type        = string
+  default     = "308782014"
+}
+
 variable "github_repository" {
   description = "GitHub repository name"
   type        = string
   default     = "example-voting-app"
+}
+
+variable "github_repository_id" {
+  description = "Immutable GitHub repository ID used in the OIDC subject"
+  type        = string
+  default     = "1421366762"
 }
 
 variable "github_branch" {
@@ -82,7 +94,7 @@ resource "aws_iam_role" "github_actions_deploy" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_owner}/${var.github_repository}:ref:refs/heads/${var.github_branch}"
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_owner}@${var.github_owner_id}/${var.github_repository}@${var.github_repository_id}:ref:refs/heads/${var.github_branch}"
         }
       }
     }]
