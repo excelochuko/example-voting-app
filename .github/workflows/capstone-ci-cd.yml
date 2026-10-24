@@ -146,17 +146,29 @@ jobs:
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
       - name: Temporarily allow this runner to access EKS
         id: open_endpoint
+        shell: bash
         run: |
           set -euo pipefail
-          aws eks update-cluster-config \
-            --name "$EKS_CLUSTER_NAME" \
-            --region "$AWS_REGION" \
-            --resources-vpc-config "endpointPublicAccess=true,endpointPrivateAccess=true,publicAccessCidrs=${RUNNER_IP}/32"
 
-          aws eks wait cluster-active \
-            --name "$EKS_CLUSTER_NAME" \
-            --region "$AWS_REGION"
+          ORIGINAL_PUBLIC="$(jq -r '.endpointPublicAccess' /tmp/eks-vpc-config.json)"
+          ORIGINAL_PRIVATE="$(jq -r '.endpointPrivateAccess' /tmp/eks-vpc-config.json)"
+          ORIGINAL_CIDRS="$(jq -Sc '.publicAccessCidrs | sort' /tmp/eks-vpc-config.json)"
+          TARGET_CIDRS="$(jq -cn --arg cidr "${RUNNER_IP}/32" '[$cidr]')"
 
+          if [[ "$ORIGINAL_PUBLIC" == "true" &&
+                "$ORIGINAL_PRIVATE" == "true" &&
+                "$ORIGINAL_CIDRS" == "$TARGET_CIDRS" ]]; then
+            echo "EKS endpoint already matches runner access settings; skipping update."
+          else
+            aws eks update-cluster-config \
+              --name "$EKS_CLUSTER_NAME" \
+              --region "$AWS_REGION" \
+              --resources-vpc-config "endpointPublicAccess=true,endpointPrivateAccess=true,publicAccessCidrs=${RUNNER_IP}/32"
+
+            aws eks wait cluster-active \
+              --name "$EKS_CLUSTER_NAME" \
+              --region "$AWS_REGION"
+          fi
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
@@ -214,11 +226,26 @@ jobs:
             exit 0
           fi
 
-          ORIGINAL_CONFIG="$(jq -c '{
+          ORIGINAL_CONFIG="$(jq -Sc '{
             endpointPublicAccess: .endpointPublicAccess,
             endpointPrivateAccess: .endpointPrivateAccess,
-            publicAccessCidrs: .publicAccessCidrs
+            publicAccessCidrs: (.publicAccessCidrs | sort)
           }' /tmp/eks-vpc-config.json)"
+
+          CURRENT_CONFIG="$(aws eks describe-cluster \
+            --name "$EKS_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --query 'cluster.resourcesVpcConfig' \
+            --output json | jq -Sc '{
+              endpointPublicAccess: .endpointPublicAccess,
+              endpointPrivateAccess: .endpointPrivateAccess,
+              publicAccessCidrs: (.publicAccessCidrs | sort)
+            }')"
+
+          if [[ "$CURRENT_CONFIG" == "$ORIGINAL_CONFIG" ]]; then
+            echo "EKS endpoint settings already match their original values; skipping restore update."
+            exit 0
+          fi
 
           aws eks update-cluster-config \
             --name "$EKS_CLUSTER_NAME" \
